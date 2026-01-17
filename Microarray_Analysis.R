@@ -26,6 +26,7 @@ BiocManager::install(c(
 ), ask = FALSE, update = TRUE, dependencies = TRUE, force = TRUE)
 
 install.packages(c("dplyr","tibble","ggplot2","pheatmap"), dependencies = TRUE)
+ls("package:hgu133plus2.db")
 ################################################################################
 library(arrayQualityMetrics)
 library(GEOquery)
@@ -147,8 +148,6 @@ levels(groups)
 annotation(raw_data)
 raw_data
 
-ls("package:hgu133plus2.db")
-
 columns(hgu133plus2.db)
 keytypes(hgu133plus2.db)
 probe_ids<-rownames(processed_data)
@@ -179,17 +178,72 @@ gene_map_df<-gene_symbols %>%
 duplicate_summary<-gene_map_df%>%
   group_by(SYMBOL)%>%
   summarise(probes_per_gene=n())%>%
-  arrange(desc(c))
+  arrange(desc(probes_per_gene))
 
 duplicate_summary
 
 #identify genes associated with multiple probes
 duplicate_genes<-duplicate_summary%>%
   filter(probes_per_gene>1)
+
 sum(duplicate_genes$probes_per_gene)
 ################################################################################
 
 ### Merge annotation mapping with expression data ###
 
 ################################################################################
+# Verify if Probe IDs in mapping correspond to expression data
+all(gene_map_df$PROBEID==row.names(processed_data))
+
+# merge annotation(symbol) with expression matrix
+processed_data_df<-processed_data%>%
+  as.data.frame()%>%
+  tibble::rownames_to_column("PROBID")%>%
+  dplyr::mutate(SYMBOL=gene_symbols[PROBID])%>%
+  dplyr::relocate(SYMBOL,.after=PROBID)
+
+#Remove prob without valid gene symbols annotation
+processed_data_df<-processed_data_df%>%
+  dplyr::filter(!is.na(SYMBOL))
+
+#Select only numeric expression column
+expr_only<-processed_data_df%>%
+  dplyr::select(-PROBID,-SYMBOL)
+#-------------------------------------------------------------------------------
+
+### limma::avereps() computes the average for probes that represent or multiple same genes
+# Example of avereps work
+x<-matrix(rnorm(8*3),8,3)
+colnames(x)<-c("S1","S2","S3")
+rownames(x)<-c("b","a","a","b","c","c","a","b")
+head(x)
+avereps(x)  #collapse duplicated renames by averaging
+
+
+averaged_data<-limma:: avereps(expr_only,ID=processed_data_df$SYMBOL)
+dim(averaged_data)
+
+data<-as.data.frame(averaged_data)
+data<-data.matrix(data)
+str(data) #check structure data
+is.numeric(data)
+
+#-------------------------------------------------------------------------------
+#### Differential Gene Expression Analysis ####
+#-------------------------------------------------------------------------------
+# Define sample groups based on phenotype data
+# Adjust group labels according to data set annotation
+
+groups<-factor(phenotype_data$source_name_ch1,
+               levels = c("gastric mocusa","gastric adenocarcinoma"),
+               labels = c("normal","cancer"))
+
+class(groups)
+levels(groups)
+#-------------------------------------------------------------------------------
+# Create design matrix for linear modeling 
+#-------------------------------------------------------------------------------
+# Using no intercept(~0+groups) allows each group to have its own coefficient
+design<-model.matrix(~groups)
+colnames(design)<-levels(groups)
 

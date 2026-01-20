@@ -334,22 +334,7 @@ heatmap_names <- ave(group_char, group_char, FUN = function(x) paste0(x, "_", se
 # Assign formatted names to heatmap columns
 colnames(heatmap_data) <- heatmap_names
 
-# Save heatmap as PNG
-png("heatmap_top50_DEGs.png", width = 2000, height = 1500, res = 300)
 
-# Generate heatmap without additional scaling
-pheatmap(
-  heatmap_data,
-  scale = "none", # for already normalized data
-  cluster_rows = FALSE,              # Disable row clustering
-  cluster_cols = TRUE,               # Cluster samples
-  show_rownames = TRUE,              # Display gene names
-  show_colnames = TRUE,              # Display sample labels
-  color = colorRampPalette(c("blue", "white", "red"))(100),
-  fontsize_row = 6,
-  fontsize_col = 8,
-  main = "Top 10 Differentially Expressed Genes"
-)
 
 dev.off()
 

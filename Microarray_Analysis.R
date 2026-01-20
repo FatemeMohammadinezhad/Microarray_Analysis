@@ -218,7 +218,7 @@ colnames(x)<-c("S1","S2","S3")
 rownames(x)<-c("b","a","a","b","c","c","a","b")
 head(x)
 avereps(x)  #collapse duplicated renames by averaging
-
+#-------------------------------------------------------------------------------
 
 averaged_data<-limma:: avereps(expr_only,ID=processed_data_df$SYMBOL)
 dim(averaged_data)
@@ -235,7 +235,7 @@ is.numeric(data)
 # Adjust group labels according to data set annotation
 
 groups<-factor(phenotype_data$source_name_ch1,
-               levels = c("gastric mocusa","gastric adenocarcinoma"),
+               levels = c("gastric mucosa","gastric adenocarcinoma"),
                labels = c("normal","cancer"))
 
 class(groups)
@@ -244,6 +244,135 @@ levels(groups)
 # Create design matrix for linear modeling 
 #-------------------------------------------------------------------------------
 # Using no intercept(~0+groups) allows each group to have its own coefficient
-design<-model.matrix(~groups)
+design<-model.matrix(~0+groups)
 colnames(design)<-levels(groups)
+
+# Fit linear model to expression data
+fit_1 <- lmFit(data, design)
+
+
+# Define contrast to compare cancer vs normal samples
+contrast_matrix <- makeContrasts(cancer_vs_normal = cancer - normal,
+                                 levels = design)
+
+# Apply contrasts and compute moderated statistics
+fit_contrast <- contrasts.fit(fit_1, contrast_matrix)
+
+fit_2 <- eBayes(fit_contrast)
+
+# -------------------------------------------------------------
+# Extract list of differentially expressed genes (DEGs)
+# -------------------------------------------------------------
+# -------------------------------------------------------------
+# Extract list of differentially expressed genes (DEGs)
+# -------------------------------------------------------------
+deg_results <- topTable(fit_2,
+                        coef = "cancer_vs_normal",  # Specify contrast of interest
+                        number = Inf,               # Return all genes
+                        adjust.method = "BH")       # Benjamini-Hochberg correction
+
+# -------------------------------------------------------------
+# Classify DEGs into Upregulated, Downregulated, or Not Significant
+# -------------------------------------------------------------
+deg_results$threshold <- as.factor(ifelse(
+  deg_results$adj.P.Val < 0.05 & deg_results$logFC > 1, "Upregulated",
+  ifelse(deg_results$adj.P.Val < 0.05 & deg_results$logFC < -1, "Downregulated",
+         "No")
+))
+# Subset genes by regulation direction
+upregulated <- subset(deg_results, threshold == "Upregulated")
+downregulated <- subset(deg_results, threshold == "Downregulated")
+# Combine both sets of DEGs
+deg_updown <- rbind(upregulated, downregulated)
+
+write.csv(deg_results, file = "Results/DEGs_Results.csv")
+write.csv(upregulated, file = "Results/Upregulated_DEGs.csv")
+write.csv(downregulated, file = "Results/Downregulated_DEGs.csv")
+write.csv(deg_updown, file = "Results/Updown_DEGs.csv")
+# -------------------------------------------------------------
+#### Data Visualization ####
+# -------------------------------------------------------------
+
+# -------------------------------------------------------------
+# Volcano Plot: visualizes DEGs by logFC and adjusted p-values
+# -------------------------------------------------------------
+# Note: x-axis = log2 fold change, y-axis = -log10 adjusted p-value
+
+# Save volcano plot as PNG
+
+dir.create("Result_Plots", showWarnings = FALSE)
+
+png("Result_Plots/volcano_plot.png", width = 2000, height = 1500, res = 300)
+
+ggplot(deg_results, aes(x = logFC, y = -log10(adj.P.Val), color = threshold)) +
+  geom_point(alpha = 0.7, size = 2) +
+  scale_color_manual(values = c("Upregulated" = "red",
+                                "Downregulated" = "blue",
+                                "No" = "grey")) +
+  theme_minimal() +
+  labs(title = "Volcano Plot of Differentially Expressed Genes",
+       x = "log2 Fold Change",
+       y = "-log10(P-value)",
+       color = "Regulation")
+
+dev.off()
+
+# -------------------------------------------------------------
+# Heatmap of Top Differentially Expressed Genes
+# -------------------------------------------------------------
+
+# Select top genes with smallest adjusted p-values
+top_genes <- head(rownames(deg_updown[order(deg_updown$adj.P.Val), ]), 10)
+
+# Subset averaged expression matrix for selected genes
+heatmap_data <- data[top_genes, ]
+
+# Generate unique column names per sample group for display
+group_char <- as.character(groups)
+heatmap_names <- ave(group_char, group_char, FUN = function(x) paste0(x, "_", seq_along(x)))
+
+# Assign formatted names to heatmap columns
+colnames(heatmap_data) <- heatmap_names
+
+# Save heatmap as PNG
+png("heatmap_top50_DEGs.png", width = 2000, height = 1500, res = 300)
+
+# Generate heatmap without additional scaling
+pheatmap(
+  heatmap_data,
+  scale = "none", # for already normalized data
+  cluster_rows = FALSE,              # Disable row clustering
+  cluster_cols = TRUE,               # Cluster samples
+  show_rownames = TRUE,              # Display gene names
+  show_colnames = TRUE,              # Display sample labels
+  color = colorRampPalette(c("blue", "white", "red"))(100),
+  fontsize_row = 6,
+  fontsize_col = 8,
+  main = "Top 10 Differentially Expressed Genes"
+)
+
+dev.off()
+
+dev.cur()
+dev.off()
+
+png("heatmap_top10_DEGs.png", width = 2000, height = 1500, res = 300)
+
+pheatmap(
+  heatmap_data,
+  scale = "none",
+  cluster_rows = FALSE,
+  cluster_cols = TRUE,
+  show_rownames = TRUE,
+  show_colnames = TRUE,
+  color = colorRampPalette(c("blue","white","red"))(100),
+  fontsize_row = 6,
+  fontsize_col = 8,
+  main = "Top 10 Differentially Expressed Genes"
+)
+
+dev.off()
+file.info("heatmap_top10_DEGs.png")$size
+
+
 

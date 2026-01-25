@@ -83,3 +83,79 @@ groups<-factor(phenotype_data$source_name_ch1,
                labels = c("cancer","normal"))
 class(groups)
 levels(groups)
+#-------------------------------------------------------------------------------
+####Prob_to_gene Mapping using AnnotationDBI####
+
+annotation(raw_data)
+raw_data
+ls("package:hgu133plus2.db")
+columns(hgu133plus2.db)
+keytypes(hgu133plus2.db)
+#-------------------------------------------------------------------------------
+### Extract PROBIDs from processed micro array data
+
+probe_ids<-rownames(processed_data)
+gene_symbols<-mapIds(hgu133plus2.db,
+                     keys=probe_ids,keytype = "PROBEID",
+                     column ="SYMBOL",multivals="first")
+gene_symbols
+
+### Convert mapping to a data frame & rename columns
+
+gene_map_df<-gene_symbols%>%
+  as.data.frame()%>%
+  tibble::rownames_to_column("PROBEID")%>%
+  dplyr::rename(SYMBOL=2)
+
+dim(processed_data)
+
+### 1. Identify duplicated and NA Probe IDs per gene
+
+duplicate_summary<-gene_map_df%>%
+  group_by(SYMBOL)%>%
+  summarise(probes_per_gene=n()) %>%
+  arrange(desc(probes_per_gene))
+
+### 2. Identify Genes associated with multiple Probes
+
+duplicated_genes<-duplicate_summary%>%
+  filter(probes_per_gene>1)
+sum(duplicate_genes$probes_per_gene)
+
+# So we can not use the approach which is based on removing Duplicated IDs 
+# We try to do average of the Probes Signals
+# We can replace ProbeIDs with Gene SYMBOLs
+
+all(gene_map_df$PROBEID==row.names(processed_data))
+
+### Merge Annotation(SYMBOL) with expression matrix
+
+processed_data_df<-processed_data%>%
+  as.data.frame() %>%
+  tibble::rownames_to_column("PROBEID") %>%
+  dplyr::mutate(SYMBOL=gene_symbols[PROBEID]) %>%
+  dplyr::relocate(SYMBOL,.after=PROBEID)
+
+### Remove Probes with NA gene symbols
+
+processed_data_df<-processed_data_df %>%
+  dplyr::filter(!is.na(SYMBOL))
+
+### Remove non-numeric columns to prepare the df to mathematical calculation
+
+expr_only<-processed_data_df %>%
+  dplyr::select(-PROBEID,-SYMBOL)
+
+### limma::avereps() computes the average for probes that represent or multiple same genes
+averaged_data<- limma::avereps(expr_only,ID=processed_data_df$SYMBOL)
+data<-as.data.frame(averaged_data) 
+data<-data.matrix(data)
+data
+dim(averaged_data)
+str(data)
+is.numeric(data)
+#-------------------------------------------------------------------------------
+#### Differential Gene Expression Analysis ####
+#-------------------------------------------------------------------------------
+# Define sample groups based on phenotype data
+# Adjust group labels according to data set annotation
